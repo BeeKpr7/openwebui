@@ -15,7 +15,7 @@ services:
       - ENABLE_SIGNUP=${ENABLE_SIGNUP:-True}
       - DEFAULT_USER_ROLE=${DEFAULT_USER_ROLE:-user}
     env_file:
-      - .env.local
+      - .env
     depends_on:
       - ollama
     networks:

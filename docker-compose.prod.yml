@@ -21,7 +21,7 @@ services:
       - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE}
       - MAX_FILE_SIZE=${MAX_FILE_SIZE}
     env_file:
-      - env.prod
+      - .env
     networks:
       - openwebui-network
     restart: unless-stopped
