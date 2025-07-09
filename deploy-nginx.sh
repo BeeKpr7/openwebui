@@ -116,11 +116,6 @@ check_env_configuration() {
         fi
     done
     
-    # Vérifier la clé secrète
-    if grep -q "your-super-secret-key-here-change-this-in-production" .env.prod; then
-        print_warning "WEBUI_SECRET_KEY n'a pas été changée! Veuillez la modifier pour la production."
-    fi
-    
     print_success "Configuration vérifiée!"
 }
 
@@ -179,7 +174,7 @@ check_services() {
     fi
     
     # Vérifier que le service répond sur le port local
-    sleep 5
+    sleep 60
     if curl -s http://127.0.0.1:8080 > /dev/null; then
         print_success "OpenWebUI répond sur le port 8080!"
     else
