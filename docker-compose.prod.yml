@@ -1,3 +1,5 @@
+version: '3.8'
+
 name: apollo13-production
 
 services:
@@ -7,7 +9,7 @@ services:
     volumes:
       - open-webui:/app/backend/data
     ports:
-      - "${OPENWEBUI_PORT:-8080}:8080"
+      - "127.0.0.1:${OPENWEBUI_PORT:-8080}:8080"
     environment:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
       - WEBUI_NAME=${WEBUI_NAME}
@@ -21,7 +23,7 @@ services:
       - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE}
       - MAX_FILE_SIZE=${MAX_FILE_SIZE}
     env_file:
-      - .env
+      - .env.prod
     networks:
       - openwebui-network
     restart: unless-stopped
