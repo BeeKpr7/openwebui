@@ -1,4 +1,4 @@
-name: openwebui-production
+name: apollo13-production
 
 services:
   openwebui:
