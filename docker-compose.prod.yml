@@ -1,0 +1,50 @@
+name: openwebui-production
+
+services:
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: openwebui-production
+    volumes:
+      - open-webui:/app/backend/data
+    ports:
+      - "${OPENWEBUI_PORT:-8080}:8080"
+    environment:
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      - WEBUI_NAME=${WEBUI_NAME}
+      - WEBUI_AUTH=${WEBUI_AUTH}
+      - ENABLE_SIGNUP=${ENABLE_SIGNUP}
+      - DEFAULT_USER_ROLE=${DEFAULT_USER_ROLE}
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+      - ENABLE_LOGIN_FORM=${ENABLE_LOGIN_FORM}
+      - ENABLE_OAUTH_SIGNUP=${ENABLE_OAUTH_SIGNUP}
+      - ENABLE_COMMUNITY_SHARING=${ENABLE_COMMUNITY_SHARING}
+      - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE}
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE}
+    env_file:
+      - env.prod
+    networks:
+      - openwebui-network
+    restart: unless-stopped
+    # Configuration pour la production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Limites de ressources pour la production
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "1.0"
+        reservations:
+          memory: 512M
+          cpus: "0.5"
+
+networks:
+  openwebui-network:
+    driver: bridge
+
+volumes:
+  open-webui:
+    driver: local 
