@@ -1,7 +1,5 @@
 version: '3.8'
 
-name: apollo13-production
-
 services:
   openwebui:
     image: ghcr.io/open-webui/open-webui:main
