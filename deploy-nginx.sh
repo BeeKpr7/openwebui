@@ -187,35 +187,6 @@ check_services() {
     fi
 }
 
-# Afficher les prochaines étapes
-show_next_steps() {
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    print_success "Déploiement terminé avec succès! 🎉"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    print_info "📋 Prochaines étapes pour finaliser l'installation :"
-    echo ""
-    echo -e "${YELLOW}1. Remplacez votre configuration nginx :${NC}"
-    echo -e "   ${BLUE}sudo cp nginx-openwebui.conf /etc/nginx/sites-available/openwebui.beekpr7.fr${NC}"
-    echo ""
-    echo -e "${YELLOW}2. Testez la configuration nginx :${NC}"
-    echo -e "   ${BLUE}sudo nginx -t${NC}"
-    echo ""
-    echo -e "${YELLOW}3. Configurez HTTPS :${NC}"
-    echo -e "   ${BLUE}./setup-https.sh${NC}"
-    echo ""
-    echo -e "${YELLOW}4. Rechargez nginx :${NC}"
-    echo -e "   ${BLUE}sudo systemctl reload nginx${NC}"
-    echo ""
-    print_warning "⚠️  N'oubliez pas de :"
-    echo -e "   ${YELLOW}• Modifier WEBUI_SECRET_KEY dans .env.prod${NC}"
-    echo -e "   ${YELLOW}• Configurer OLLAMA_BASE_URL selon votre setup${NC}"
-    echo -e "   ${YELLOW}• Configurer HTTPS avec: ./setup-https.sh${NC}"
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-}
-
 # Fonction principale
 main() {
     print_info "Vérification des prérequis..."
@@ -230,7 +201,6 @@ main() {
     stop_containers
     start_services
     check_services
-    show_next_steps
 }
 
 # Gestion des erreurs
