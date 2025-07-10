@@ -20,8 +20,6 @@ services:
       - ENABLE_COMMUNITY_SHARING=${ENABLE_COMMUNITY_SHARING}
       - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE}
       - MAX_FILE_SIZE=${MAX_FILE_SIZE}
-      - CHROMA_DB_IMPL=duckdb+parquet
-      - CHROMA_DB_PATH=/app/backend/data/vector_db
       - SENTENCE_TRANSFORMERS_HOME=/app/backend/data/cache
       - TRANSFORMERS_CACHE=/app/backend/data/cache
       - CHUNK_SIZE=${CHUNK_SIZE:-1500}
