@@ -20,6 +20,12 @@ services:
       - ENABLE_COMMUNITY_SHARING=${ENABLE_COMMUNITY_SHARING}
       - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE}
       - MAX_FILE_SIZE=${MAX_FILE_SIZE}
+      - CHROMA_DB_IMPL=duckdb+parquet
+      - CHROMA_DB_PATH=/app/backend/data/vector_db
+      - SENTENCE_TRANSFORMERS_HOME=/app/backend/data/cache
+      - TRANSFORMERS_CACHE=/app/backend/data/cache
+      - CHUNK_SIZE=${CHUNK_SIZE:-1500}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-150}
     env_file:
       - .env.prod
     networks:
@@ -32,9 +38,9 @@ services:
         max-size: "10m"
         max-file: "3"
     # Limites de ressources pour la production (compatible Docker Compose standalone)
-    mem_limit: 2G
-    cpus: "1.0"
-    mem_reservation: 256M
+    mem_limit: 4G
+    cpus: "2.0"
+    mem_reservation: 512M
 
 networks:
   openwebui-network:

@@ -14,6 +14,14 @@ services:
       - WEBUI_AUTH=${WEBUI_AUTH:-True}
       - ENABLE_SIGNUP=${ENABLE_SIGNUP:-True}
       - DEFAULT_USER_ROLE=${DEFAULT_USER_ROLE:-user}
+      - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-25000000}
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-25000000}
+      - CHROMA_DB_IMPL=duckdb+parquet
+      - CHROMA_DB_PATH=/app/backend/data/vector_db
+      - SENTENCE_TRANSFORMERS_HOME=/app/backend/data/cache
+      - TRANSFORMERS_CACHE=/app/backend/data/cache
+      - CHUNK_SIZE=${CHUNK_SIZE:-1000}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-200}
     env_file:
       - .env
     depends_on:
