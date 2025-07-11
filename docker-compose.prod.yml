@@ -35,10 +35,14 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    # Limites de ressources pour la production (compatible Docker Compose standalone)
-    mem_limit: 4G
-    cpus: "2.0"
-    mem_reservation: 512M
+    # Limites de ressources (compatibles avec Docker Compose v3+)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          memory: 512M
 
 networks:
   openwebui-network:

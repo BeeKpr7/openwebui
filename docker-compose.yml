@@ -1,35 +1,49 @@
-name: apollo13
+name: apollo-13
 
 services:
   openwebui:
     image: ghcr.io/open-webui/open-webui:main
-    container_name: openwebui
+    container_name: openwebui-production
     volumes:
       - open-webui:/app/backend/data
     ports:
-      - "${OPENWEBUI_PORT:-8080}:8080"
+      - "127.0.0.1:${OPENWEBUI_PORT:-8080}:8080"
     environment:
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
       - WEBUI_NAME=${WEBUI_NAME}
-      - WEBUI_AUTH=${WEBUI_AUTH:-True}
-      - ENABLE_SIGNUP=${ENABLE_SIGNUP:-True}
-      - DEFAULT_USER_ROLE=${DEFAULT_USER_ROLE:-user}
-      - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE:-25000000}
-      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-25000000}
-      - CHROMA_DB_IMPL=duckdb+parquet
-      - CHROMA_DB_PATH=/app/backend/data/vector_db
+      - WEBUI_AUTH=${WEBUI_AUTH}
+      - ENABLE_SIGNUP=${ENABLE_SIGNUP}
+      - DEFAULT_USER_ROLE=${DEFAULT_USER_ROLE}
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+      - ENABLE_LOGIN_FORM=${ENABLE_LOGIN_FORM}
+      - ENABLE_OAUTH_SIGNUP=${ENABLE_OAUTH_SIGNUP}
+      - ENABLE_COMMUNITY_SHARING=${ENABLE_COMMUNITY_SHARING}
+      - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE}
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE}
       - SENTENCE_TRANSFORMERS_HOME=/app/backend/data/cache
       - TRANSFORMERS_CACHE=/app/backend/data/cache
-      - CHUNK_SIZE=${CHUNK_SIZE:-1000}
-      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-200}
+      - CHUNK_SIZE=${CHUNK_SIZE:-1500}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-150}
     env_file:
-      - .env
-    depends_on:
-      - ollama
+      - .env.local
     networks:
       - openwebui-network
     restart: unless-stopped
-
+    # Configuration pour la production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Limites de ressources (compatibles avec Docker Compose v3+)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          memory: 512M
+    
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
@@ -42,14 +56,14 @@ services:
     networks:
       - openwebui-network
     restart: unless-stopped
-    # Décommentez les lignes suivantes si vous avez un GPU NVIDIA
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+    # Ajouter des limites de ressources pour ollama
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 8G
+        reservations:
+          memory: 1G
 
 networks:
   openwebui-network:
