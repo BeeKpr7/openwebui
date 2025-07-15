@@ -150,6 +150,26 @@ start_services() {
     print_success "Services démarrés avec succès!"
 }
 
+# Vérifier le statut des services
+check_services() {
+    print_info "Vérification du statut des services..."
+    
+    if command -v docker-compose &> /dev/null; then
+        docker-compose ps
+    else
+        docker compose ps
+    fi
+    
+    # Vérifier que le service répond sur le port local
+    print_info "Test de connexion à OpenWebUI..."
+    sleep 60
+    if curl -s http://127.0.0.1:8080 > /dev/null; then
+        print_success "OpenWebUI répond sur le port 8080!"
+    else
+        print_warning "OpenWebUI ne répond pas encore sur le port 8080. Vérifiez les logs."
+    fi
+}
+
 # Afficher les informations de connexion
 show_connection_info() {
     echo ""
@@ -184,6 +204,7 @@ main() {
     check_env_configuration
     stop_containers
     start_services
+    check_services
     show_connection_info
 }
 
