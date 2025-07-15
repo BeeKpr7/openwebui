@@ -79,26 +79,50 @@ EOF
     print_success "Fichier .env.prod trouvé!"
 }
 
-# Créer le lien symbolique si nécessaire
-create_symlink() {
+# Créer le lien symbolique pour .env
+create_env_symlink() {
     if [ -L ".env" ]; then
         print_warning "Le lien symbolique .env existe déjà. Suppression..."
         rm .env
     fi
     
     if [ -f ".env" ]; then
-        print_warning "Le fichier .env existe. Création d'une sauvegarde..."
-        mv .env .env.backup
+        print_warning "Le fichier .env existe. Suppression..."
+        rm .env
     fi
     
     print_info "Création du lien symbolique .env -> .env.prod"
     ln -sf .env.prod .env
     
-    # Vérifier que le lien symbolique fonctionne
+    # Vérifier que le lien symbolique .env fonctionne
     if [ -L ".env" ] && [ -f ".env" ]; then
-        print_success "Lien symbolique créé avec succès!"
+        print_success "Lien symbolique .env créé avec succès!"
     else
-        print_error "Erreur lors de la création du lien symbolique"
+        print_error "Erreur lors de la création du lien symbolique .env"
+        exit 1
+    fi
+}
+
+# Créer le lien symbolique pour docker-compose
+create_docker_compose_symlink() {
+    if [ -L "docker-compose.yml" ]; then
+        print_warning "Le lien symbolique docker-compose.yml existe déjà. Suppression..."
+        rm docker-compose.yml
+    fi
+    
+    if [ -f "docker-compose.yml" ]; then
+        print_warning "Le fichier docker-compose.yml existe. Suppression..."
+        rm docker-compose.yml
+    fi
+    
+    print_info "Création du lien symbolique docker-compose.yml -> config/docker/docker-compose.prod.yml"
+    ln -sf config/docker/docker-compose.prod.yml docker-compose.yml
+    
+    # Vérifier que le lien symbolique docker-compose.yml fonctionne
+    if [ -L "docker-compose.yml" ] && [ -f "docker-compose.yml" ]; then
+        print_success "Lien symbolique docker-compose.yml créé avec succès!"
+    else
+        print_error "Erreur lors de la création du lien symbolique docker-compose.yml"
         exit 1
     fi
 }
@@ -141,9 +165,9 @@ stop_containers() {
     
     # Utiliser docker-compose ou docker compose selon la disponibilité
     if command -v docker-compose &> /dev/null; then
-        docker-compose -f docker-compose.prod.yml down --remove-orphans 2>/dev/null || true
+        docker-compose down --remove-orphans 2>/dev/null || true
     else
-        docker compose -f docker-compose.prod.yml down --remove-orphans 2>/dev/null || true
+        docker compose down --remove-orphans 2>/dev/null || true
     fi
     
     print_success "Conteneurs arrêtés!"
@@ -155,9 +179,9 @@ start_services() {
     
     # Utiliser docker-compose ou docker compose selon la disponibilité
     if command -v docker-compose &> /dev/null; then
-        docker-compose -f docker-compose.prod.yml up -d
+        docker-compose up -d
     else
-        docker compose -f docker-compose.prod.yml up -d
+        docker compose up -d
     fi
     
     print_success "Services démarrés avec succès!"
@@ -168,9 +192,9 @@ check_services() {
     print_info "Vérification du statut des services..."
     
     if command -v docker-compose &> /dev/null; then
-        docker-compose -f docker-compose.prod.yml ps
+        docker-compose ps
     else
-        docker compose -f docker-compose.prod.yml ps
+        docker compose ps
     fi
     
     # Vérifier que le service répond sur le port local
@@ -191,7 +215,8 @@ main() {
     print_success "Prérequis vérifiés!"
     
     check_env_prod
-    create_symlink
+    create_env_symlink
+    create_docker_compose_symlink
     check_env_configuration
     stop_containers
     start_services

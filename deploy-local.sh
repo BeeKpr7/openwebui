@@ -65,26 +65,50 @@ check_env_local() {
     print_success "Fichier .env.local trouvé!"
 }
 
-# Créer le lien symbolique si nécessaire
-create_symlink() {
+# Créer le lien symbolique pour .env
+create_env_symlink() {
     if [ -L ".env" ]; then
         print_warning "Le lien symbolique .env existe déjà. Suppression..."
         rm .env
     fi
     
     if [ -f ".env" ]; then
-        print_warning "Le fichier .env existe. Création d'une sauvegarde..."
-        mv .env .env.backup
+        print_warning "Le fichier .env existe. Suppression..."
+        rm .env
     fi
     
     print_info "Création du lien symbolique .env -> .env.local"
     ln -sf .env.local .env
     
-    # Vérifier que le lien symbolique fonctionne
+    # Vérifier que le lien symbolique .env fonctionne
     if [ -L ".env" ] && [ -f ".env" ]; then
-        print_success "Lien symbolique créé avec succès!"
+        print_success "Lien symbolique .env créé avec succès!"
     else
-        print_error "Erreur lors de la création du lien symbolique"
+        print_error "Erreur lors de la création du lien symbolique .env"
+        exit 1
+    fi
+}
+
+# Créer le lien symbolique pour docker-compose
+create_docker_compose_symlink() {
+    if [ -L "docker-compose.yml" ]; then
+        print_warning "Le lien symbolique docker-compose.yml existe déjà. Suppression..."
+        rm docker-compose.yml
+    fi
+    
+    if [ -f "docker-compose.yml" ]; then
+        print_warning "Le fichier docker-compose.yml existe. Suppression..."
+        rm docker-compose.yml
+    fi
+    
+    print_info "Création du lien symbolique docker-compose.yml -> config/docker/docker-compose.yml"
+    ln -sf config/docker/docker-compose.yml docker-compose.yml
+    
+    # Vérifier que le lien symbolique docker-compose.yml fonctionne
+    if [ -L "docker-compose.yml" ] && [ -f "docker-compose.yml" ]; then
+        print_success "Lien symbolique docker-compose.yml créé avec succès!"
+    else
+        print_error "Erreur lors de la création du lien symbolique docker-compose.yml"
         exit 1
     fi
 }
@@ -155,7 +179,8 @@ main() {
     print_success "Prérequis vérifiés!"
     
     check_env_local
-    create_symlink
+    create_env_symlink
+    create_docker_compose_symlink
     check_env_configuration
     stop_containers
     start_services
