@@ -61,6 +61,7 @@ SHOW_HELP=false
 S3_BUCKET=""
 S3_PREFIX="openwebui-backups/"
 S3_ONLY=false
+DATA_ONLY=false
 ENV_FILE=""
 ENV_TYPE=""
 
@@ -81,6 +82,7 @@ OPTIONS:
     --s3-bucket BUCKET          Bucket S3 pour sauvegarde distante
     --s3-prefix PREFIX          Préfixe S3 (défaut: openwebui-backups/)
     --s3-only                   Sauvegarder uniquement vers S3 (pas de copie locale)
+    --data-only                 Sauvegarder uniquement les données essentielles (exclut cache et modèles)
     --env local|prod            Environnement à utiliser (charge .env.local ou .env.prod)
     --env-file FILE             Fichier d'environnement personnalisé à charger
     --help                      Afficher cette aide
@@ -90,6 +92,7 @@ EXAMPLES:
     $0 --quiet                                      # Pour utilisation avec cron
     $0 --env local                                  # Avec variables d'environnement locales
     $0 --env prod --s3-only                         # Sauvegarde S3 prod uniquement
+    $0 --data-only                                  # Sauvegarde des données essentielles uniquement
     $0 --env-file .env.custom                       # Fichier d'environnement personnalisé
     $0 --output-dir /path/to/backup                 # Répertoire personnalisé
     $0 --s3-bucket mon-bucket-s3                    # Sauvegarde locale + S3
@@ -257,17 +260,32 @@ create_backup() {
     fi
     
     # Créer la sauvegarde
+    local tar_command
+    if [ "$DATA_ONLY" = true ]; then
+        log "Mode sauvegarde des données essentielles uniquement"
+        # Exclure cache, logs, et fichiers temporaires volumineux
+        tar_command="tar czf \"/backup/$backup_filename\" -C /data --exclude='cache/*' --exclude='*.log' --exclude='*.tmp' --exclude='temp/*' --exclude='logs/*' --exclude='models/*' ."
+    else
+        log "Mode sauvegarde complète"
+        tar_command="tar czf \"/backup/$backup_filename\" -C /data ."
+    fi
+    
     if docker run --rm \
         -v "$VOLUME_NAME:/data:ro" \
         -v "$backup_dir:/backup" \
         alpine:latest \
-        tar czf "/backup/$backup_filename" -C /data .; then
+        sh -c "$tar_command"; then
         
         # Vérifier que le fichier a bien été créé
         if [ -f "$backup_file" ]; then
             local file_size
             file_size=$(ls -lh "$backup_file" | awk '{print $5}')
-            success "Sauvegarde créée avec succès ($file_size)"
+            if [ "$DATA_ONLY" = true ]; then
+                success "Sauvegarde des données essentielles créée avec succès ($file_size)"
+                log "Exclusions appliquées : cache, logs, modèles, fichiers temporaires"
+            else
+                success "Sauvegarde complète créée avec succès ($file_size)"
+            fi
             
             if [ "$S3_ONLY" = false ]; then
                 echo "Chemin local : $(realpath "$backup_file")"
@@ -510,6 +528,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --s3-only)
             S3_ONLY=true
+            shift
+            ;;
+        --data-only)
+            DATA_ONLY=true
             shift
             ;;
         --env)
