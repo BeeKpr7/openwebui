@@ -26,6 +26,27 @@ BACKUP_DIR="$PROJECT_ROOT/backups"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 BACKUP_PREFIX="update_openwebui_"
 
+# Chargement des variables d'environnement
+load_env_file() {
+    local env_file="$1"
+    if [ -f "$env_file" ]; then
+        log "Chargement des variables depuis : $env_file"
+        # Exporter les variables en ignorant les commentaires et lignes vides
+        while IFS= read -r line || [ -n "$line" ]; do
+            # Ignorer les commentaires et lignes vides
+            if [[ ! "$line" =~ ^[[:space:]]*# ]] && [[ -n "${line// }" ]]; then
+                # Exporter la variable si elle n'est pas déjà définie
+                local var_name="${line%%=*}"
+                if [ -z "${!var_name:-}" ]; then
+                    export "$line"
+                fi
+            fi
+        done < "$env_file"
+    else
+        warning "Fichier d'environnement introuvable : $env_file"
+    fi
+}
+
 # Couleurs pour l'affichage
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -40,6 +61,8 @@ SHOW_HELP=false
 S3_BUCKET=""
 S3_PREFIX="openwebui-backups/"
 S3_ONLY=false
+ENV_FILE=""
+ENV_TYPE=""
 
 # =============================================================================
 # Fonctions utilitaires
@@ -58,15 +81,28 @@ OPTIONS:
     --s3-bucket BUCKET          Bucket S3 pour sauvegarde distante
     --s3-prefix PREFIX          Préfixe S3 (défaut: openwebui-backups/)
     --s3-only                   Sauvegarder uniquement vers S3 (pas de copie locale)
+    --env local|prod            Environnement à utiliser (charge .env.local ou .env.prod)
+    --env-file FILE             Fichier d'environnement personnalisé à charger
     --help                      Afficher cette aide
 
 EXAMPLES:
     $0                                              # Sauvegarde locale standard
     $0 --quiet                                      # Pour utilisation avec cron
+    $0 --env local                                  # Avec variables d'environnement locales
+    $0 --env prod --s3-only                         # Sauvegarde S3 prod uniquement
+    $0 --env-file .env.custom                       # Fichier d'environnement personnalisé
     $0 --output-dir /path/to/backup                 # Répertoire personnalisé
     $0 --s3-bucket mon-bucket-s3                    # Sauvegarde locale + S3
     $0 --s3-bucket mon-bucket-s3 --s3-only          # Sauvegarde S3 uniquement
     $0 --s3-bucket mon-bucket-s3 --s3-prefix bkp/   # Avec préfixe S3 personnalisé
+
+VARIABLES D'ENVIRONNEMENT:
+    Si --env ou --env-file est spécifié, les variables suivantes seront chargées :
+    - AWS_ACCESS_KEY_ID         : Clé d'accès AWS
+    - AWS_SECRET_ACCESS_KEY     : Clé secrète AWS
+    - AWS_DEFAULT_REGION        : Région AWS par défaut
+    - S3_BACKUP_BUCKET          : Nom du bucket S3 (remplace --s3-bucket)
+    - S3_BACKUP_PREFIX          : Préfixe S3 (remplace --s3-prefix)
 
 SORTIE:
     Le fichier de sauvegarde sera nommé : ${BACKUP_PREFIX}YYYYMMDD_HHMMSS.tar.gz
@@ -176,9 +212,12 @@ check_prerequisites() {
         fi
         
         # Vérifier la configuration AWS
-        if ! aws sts get-caller-identity &> /dev/null; then
+        # Si les variables d'environnement sont définies, on peut continuer
+        if [ -n "${AWS_ACCESS_KEY_ID:-}" ] && [ -n "${AWS_SECRET_ACCESS_KEY:-}" ]; then
+            log "Variables AWS définies dans l'environnement"
+        elif ! aws sts get-caller-identity &> /dev/null; then
             error "AWS CLI n'est pas configuré correctement"
-            error "Exécutez: aws configure"
+            error "Exécutez: aws configure ou définissez AWS_ACCESS_KEY_ID et AWS_SECRET_ACCESS_KEY"
             exit 1
         fi
         
@@ -278,15 +317,15 @@ upload_to_s3() {
         local_md5=""
     fi
     
-    # Upload vers S3
-    if aws s3 cp "$local_file" "$s3_url" --only-show-errors; then
+    # Upload vers S3 avec endpoint Hetzner
+    if aws s3 cp "$local_file" "$s3_url" --endpoint-url https://nbg1.your-objectstorage.com --only-show-errors; then
         success "Upload S3 réussi : $s3_url"
         
         # Vérification optionnelle de l'intégrité
         if [ -n "$local_md5" ]; then
             log "Vérification de l'intégrité..."
             local s3_etag
-            s3_etag=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$s3_key" --query 'ETag' --output text 2>/dev/null | tr -d '"')
+            s3_etag=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$s3_key" --endpoint-url https://nbg1.your-objectstorage.com --query 'ETag' --output text 2>/dev/null | tr -d '"')
             
             if [ "$local_md5" = "$s3_etag" ]; then
                 success "Intégrité vérifiée ✓"
@@ -342,6 +381,7 @@ cleanup_old_backups() {
         s3_objects=$(aws s3api list-objects-v2 \
             --bucket "$S3_BUCKET" \
             --prefix "$S3_PREFIX$BACKUP_PREFIX" \
+            --endpoint-url https://nbg1.your-objectstorage.com \
             --query 'Contents[?Size>`0`].[Key,LastModified]' \
             --output text 2>/dev/null | \
             sort -k2 -r | \
@@ -352,7 +392,7 @@ cleanup_old_backups() {
             log "Suppression des anciennes sauvegardes S3..."
             echo "$s3_objects" | while read -r key; do
                 if [ -n "$key" ]; then
-                    if aws s3 rm "s3://$S3_BUCKET/$key" --only-show-errors; then
+                    if aws s3 rm "s3://$S3_BUCKET/$key" --endpoint-url https://nbg1.your-objectstorage.com --only-show-errors; then
                         log "Supprimé S3 : $(basename "$key")"
                     fi
                 fi
@@ -370,6 +410,45 @@ main_backup() {
         echo "💾 Sauvegarde automatique d'OpenWebUI"
         echo "====================================="
         echo
+    fi
+    
+    # Charger les variables d'environnement si spécifié
+    if [ -n "$ENV_TYPE" ]; then
+        case "$ENV_TYPE" in
+            "local")
+                ENV_FILE="$PROJECT_ROOT/.env.local"
+                log "Utilisation de l'environnement local : .env.local"
+                ;;
+            "prod")
+                ENV_FILE="$PROJECT_ROOT/.env.prod"
+                log "Utilisation de l'environnement de production : .env.prod"
+                ;;
+            *)
+                error "Type d'environnement invalide : $ENV_TYPE (utilisez 'local' ou 'prod')"
+                exit 1
+                ;;
+        esac
+    fi
+    
+    if [ -n "$ENV_FILE" ]; then
+        if [[ "$ENV_FILE" = /* ]]; then
+            # Chemin absolu
+            load_env_file "$ENV_FILE"
+        else
+            # Chemin relatif depuis la racine du projet
+            load_env_file "$PROJECT_ROOT/$ENV_FILE"
+        fi
+        
+        # Utiliser les variables d'environnement si disponibles
+        if [ -z "$S3_BUCKET" ] && [ -n "${S3_BACKUP_BUCKET:-}" ]; then
+            S3_BUCKET="$S3_BACKUP_BUCKET"
+            log "Bucket S3 défini depuis l'environnement : $S3_BUCKET"
+        fi
+        
+        if [ "$S3_PREFIX" = "openwebui-backups/" ] && [ -n "${S3_BACKUP_PREFIX:-}" ]; then
+            S3_PREFIX="$S3_BACKUP_PREFIX"
+            log "Préfixe S3 défini depuis l'environnement : $S3_PREFIX"
+        fi
     fi
     
     check_prerequisites
@@ -432,6 +511,14 @@ while [[ $# -gt 0 ]]; do
         --s3-only)
             S3_ONLY=true
             shift
+            ;;
+        --env)
+            ENV_TYPE="$2"
+            shift 2
+            ;;
+        --env-file)
+            ENV_FILE="$2"
+            shift 2
             ;;
         --help|-h)
             SHOW_HELP=true
