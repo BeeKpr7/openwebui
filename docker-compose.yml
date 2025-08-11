@@ -1,1 +1,76 @@
-config/docker/docker-compose.yml
+name: apollo-13
+
+services:
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: openwebui-local
+    volumes:
+      - open-webui:/app/backend/data
+    ports:
+      - "127.0.0.1:${OPENWEBUI_PORT:-8080}:8080"
+    environment:
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      - WEBUI_NAME=${WEBUI_NAME}
+      - WEBUI_AUTH=${WEBUI_AUTH}
+      - ENABLE_SIGNUP=${ENABLE_SIGNUP}
+      - DEFAULT_USER_ROLE=${DEFAULT_USER_ROLE}
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+      - ENABLE_LOGIN_FORM=${ENABLE_LOGIN_FORM}
+      - ENABLE_OAUTH_SIGNUP=${ENABLE_OAUTH_SIGNUP}
+      - ENABLE_COMMUNITY_SHARING=${ENABLE_COMMUNITY_SHARING}
+      - MAX_UPLOAD_SIZE=${MAX_UPLOAD_SIZE}
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE}
+      - SENTENCE_TRANSFORMERS_HOME=/app/backend/data/cache
+      - TRANSFORMERS_CACHE=/app/backend/data/cache
+      - CHUNK_SIZE=${CHUNK_SIZE:-1500}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-150}
+    env_file:
+      - .env.local
+    networks:
+      - openwebui-network
+    restart: unless-stopped
+    # Configuration pour la production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Limites de ressources (compatibles avec Docker Compose v3+)
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          memory: 512M
+    
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama:/root/.ollama
+    env_file:
+      - .env.local
+    networks:
+      - openwebui-network
+    restart: unless-stopped
+    # Ajouter des limites de ressources pour ollama
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 8G
+        reservations:
+          memory: 1G
+
+networks:
+  openwebui-network:
+    driver: bridge
+
+volumes:
+  open-webui:
+    driver: local
+  ollama:
+    driver: local 

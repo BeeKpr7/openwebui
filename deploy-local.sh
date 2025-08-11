@@ -89,8 +89,8 @@ create_env_symlink() {
     fi
 }
 
-# Créer le lien symbolique pour docker-compose
-create_docker_compose_symlink() {
+# Créer la configuration docker-compose
+create_docker_compose_config() {
     if [ -L "docker-compose.yml" ]; then
         print_warning "Le lien symbolique docker-compose.yml existe déjà. Suppression..."
         rm docker-compose.yml
@@ -101,14 +101,17 @@ create_docker_compose_symlink() {
         rm docker-compose.yml
     fi
     
-    print_info "Création du lien symbolique docker-compose.yml -> config/docker/docker-compose.yml"
-    ln -sf config/docker/docker-compose.yml docker-compose.yml
+    print_info "Copie de la configuration Docker Compose locale"
+    cp config/docker/docker-compose.yml docker-compose.yml
     
-    # Vérifier que le lien symbolique docker-compose.yml fonctionne
-    if [ -L "docker-compose.yml" ] && [ -f "docker-compose.yml" ]; then
-        print_success "Lien symbolique docker-compose.yml créé avec succès!"
+    print_info "Ajustement des chemins relatifs dans docker-compose.yml"
+    sed -i '' 's|../../\.env\.local|.env.local|g' docker-compose.yml
+    
+    # Vérifier que le fichier docker-compose.yml fonctionne
+    if [ -f "docker-compose.yml" ]; then
+        print_success "Configuration docker-compose.yml créée avec succès!"
     else
-        print_error "Erreur lors de la création du lien symbolique docker-compose.yml"
+        print_error "Erreur lors de la création de docker-compose.yml"
         exit 1
     fi
 }
@@ -200,7 +203,7 @@ main() {
     
     check_env_local
     create_env_symlink
-    create_docker_compose_symlink
+    create_docker_compose_config
     check_env_configuration
     stop_containers
     start_services
