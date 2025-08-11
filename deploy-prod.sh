@@ -119,7 +119,8 @@ create_docker_compose_config() {
     cp config/docker/docker-compose.prod.yml docker-compose.yml
     
     print_info "Ajustement des chemins relatifs dans docker-compose.yml"
-    sed -i '' 's|../../\.env\.prod|.env.prod|g' docker-compose.yml
+    sed -i.bak 's|../../\.env\.prod|.env.prod|g' docker-compose.yml
+    rm -f docker-compose.yml.bak
     
     # Vérifier que le fichier docker-compose.yml fonctionne
     if [ -f "docker-compose.yml" ]; then
