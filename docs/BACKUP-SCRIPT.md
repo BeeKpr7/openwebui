@@ -1,6 +1,6 @@
-# 💾 Scripts de Sauvegarde OpenWebUI
+# 💾 Script de Sauvegarde OpenWebUI
 
-Ce répertoire contient les scripts nécessaires pour effectuer des sauvegardes automatiques d'OpenWebUI vers un stockage S3 (Hetzner Object Storage).
+Documentation complète du script `backup-openwebui.sh` pour effectuer des sauvegardes automatiques d'OpenWebUI vers un stockage S3 (Hetzner Object Storage).
 
 ## 📋 Table des matières
 
@@ -10,17 +10,15 @@ Ce répertoire contient les scripts nécessaires pour effectuer des sauvegardes 
 - [Utilisation](#utilisation)
 - [Processus de backup](#processus-de-backup)
 - [Automatisation](#automatisation)
-- [Restauration](#restauration)
 - [Dépannage](#dépannage)
 
 ## 🔍 Vue d'ensemble
 
-### Scripts disponibles
+### Script disponible
 
 | Script | Description | Taille | Dernière modification |
 |--------|-------------|--------|----------------------|
 | `backup-openwebui.sh` | Script principal de sauvegarde avec support S3 | ~18KB | Août 2025 |
-| `README.md` | Documentation complète | ~8KB | Ce fichier |
 
 ### Fonctionnalités
 
@@ -80,14 +78,6 @@ AWS_SECRET_ACCESS_KEY=irByeRyDOGajR9MuPAeIxYEyaHAnI5PQnglmBIC0
 AWS_DEFAULT_REGION=nbg1
 S3_BACKUP_BUCKET=apollo13
 S3_BACKUP_PREFIX=openwebui-backups/prod/
-```
-
-### 2. Profil AWS (optionnel)
-
-Vous pouvez aussi utiliser un profil AWS configuré :
-
-```bash
-aws configure --profile apollo13
 ```
 
 ## 🚀 Utilisation
@@ -349,58 +339,6 @@ sudo journalctl -f | grep backup-openwebui
 
 # Ou rediriger vers un fichier de log
 ./config/script/backup-openwebui.sh --env prod --quiet >> /var/log/openwebui-backup.log 2>&1
-```
-
-## 🔄 Restauration
-
-### Depuis une sauvegarde locale
-
-```bash
-# Restaurer depuis un fichier local
-docker run --rm \
-  -v VOLUME_NAME:/data \
-  -v /path/to/backup:/backup \
-  alpine tar xzf /backup/update_openwebui_YYYYMMDD_HHMMSS.tar.gz -C /data
-```
-
-### Depuis S3
-
-```bash
-# 1. Télécharger depuis S3
-aws s3 cp s3://apollo13/openwebui-backups/prod/update_openwebui_YYYYMMDD_HHMMSS.tar.gz /tmp/ \
-  --endpoint-url https://nbg1.your-objectstorage.com
-
-# 2. Restaurer dans Docker
-docker run --rm \
-  -v VOLUME_NAME:/data \
-  -v /tmp:/backup \
-  alpine tar xzf /backup/update_openwebui_YYYYMMDD_HHMMSS.tar.gz -C /data
-```
-
-### Exemple complet de restauration
-
-```bash
-# Identifier le volume OpenWebUI
-docker volume ls | grep open-webui
-
-# Télécharger la sauvegarde
-aws s3 cp s3://apollo13/openwebui-backups/prod/update_openwebui_20250811_111628.tar.gz /tmp/ \
-  --profile apollo13 --endpoint-url https://nbg1.your-objectstorage.com
-
-# Arrêter OpenWebUI
-docker-compose down
-
-# Restaurer les données
-docker run --rm \
-  -v apollo-13_open-webui:/data \
-  -v /tmp:/backup \
-  alpine tar xzf /backup/update_openwebui_20250811_111628.tar.gz -C /data
-
-# Redémarrer OpenWebUI
-docker-compose up -d
-
-# Nettoyer
-rm /tmp/update_openwebui_20250811_111628.tar.gz
 ```
 
 ## 📁 Organisation des sauvegardes
