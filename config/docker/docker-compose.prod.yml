@@ -25,7 +25,7 @@ services:
       - CHUNK_SIZE=${CHUNK_SIZE:-1500}
       - CHUNK_OVERLAP=${CHUNK_OVERLAP:-150}
     env_file:
-      - .env.prod
+      - /Users/echiappino/PeakStudio/openwebui/.env.prod
     networks:
       - openwebui-network
     restart: unless-stopped

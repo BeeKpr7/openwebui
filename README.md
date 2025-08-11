@@ -28,9 +28,12 @@ Le projet utilise une architecture conteneurisée avec Docker Compose :
 │   ├── docker/
 │   │   ├── docker-compose.yml      # Configuration locale
 │   │   └── docker-compose.prod.yml # Configuration production
-│   └── nginx/
-│       ├── nginx-initial.conf
-│       └── nginx-openwebui.conf
+│   ├── nginx/
+│   │   ├── nginx-initial.conf
+│   │   └── nginx-openwebui.conf
+│   └── script/
+│       ├── backup-openwebui.sh     # Script de sauvegarde automatique
+│       └── update-openwebui.sh     # Script de mise à jour automatique
 ├── docs/
 │   └── OPENWEBUI.md
 ├── .env.local                      # Configuration locale
@@ -42,6 +45,154 @@ Le projet utilise une architecture conteneurisée avec Docker Compose :
 ```
 
 Les liens symboliques sont créés automatiquement par les scripts de déploiement et sont ignorés par git (`.gitignore`).
+
+## 🔄 Mise à jour automatique
+
+Un script de mise à jour automatisé est disponible pour maintenir votre installation OpenWebUI à jour :
+
+### Script de mise à jour rapide
+
+```bash
+# Exécution du script de mise à jour
+./config/script/update-openwebui.sh
+```
+
+**Le script automatise complètement :**
+- ✅ Vérification des prérequis (Docker, Docker Compose)
+- ✅ Sauvegarde optionnelle des données existantes
+- ✅ Arrêt et suppression du conteneur actuel
+- ✅ Téléchargement de la dernière image OpenWebUI
+- ✅ Redémarrage avec docker-compose
+- ✅ Vérification post-mise à jour
+
+### Options disponibles
+
+```bash
+# Mise à jour avec sauvegarde forcée
+./config/script/update-openwebui.sh --backup
+
+# Mise à jour sans sauvegarde
+./config/script/update-openwebui.sh --no-backup
+
+# Simulation de la mise à jour (dry-run)
+./config/script/update-openwebui.sh --dry-run
+
+# Afficher l'aide
+./config/script/update-openwebui.sh --help
+```
+
+### En cas de problème
+
+Le script inclut une gestion d'erreur robuste :
+- Affichage automatique des logs en cas d'échec
+- Possibilité de rollback manuel via les sauvegardes
+- Instructions de dépannage intégrées
+
+## 💾 Sauvegarde automatique
+
+Un script de sauvegarde dédié permet de créer des sauvegardes indépendamment des mises à jour :
+
+### Script de sauvegarde rapide
+
+```bash
+# Sauvegarde manuelle immédiate
+./config/script/backup-openwebui.sh
+```
+
+### Options de sauvegarde
+
+```bash
+# Sauvegarde silencieuse (pour cron)
+./config/script/backup-openwebui.sh --quiet
+
+# Sauvegarde vers un répertoire personnalisé
+./config/script/backup-openwebui.sh --output-dir /path/to/backup
+
+# Sauvegarde locale + S3
+./config/script/backup-openwebui.sh --s3-bucket mon-bucket-s3
+
+# Sauvegarde uniquement vers S3 (pas de copie locale)
+./config/script/backup-openwebui.sh --s3-bucket mon-bucket-s3 --s3-only
+
+# Sauvegarde S3 avec préfixe personnalisé
+./config/script/backup-openwebui.sh --s3-bucket mon-bucket-s3 --s3-prefix backups/openwebui/
+
+# Afficher l'aide
+./config/script/backup-openwebui.sh --help
+```
+
+### Configuration avec Cron
+
+Pour automatiser les sauvegardes quotidiennes :
+
+```bash
+# Éditer le crontab
+crontab -e
+
+# Sauvegarde locale quotidienne à 2h du matin
+0 2 * * * /chemin/vers/openwebui/config/script/backup-openwebui.sh --quiet
+
+# Sauvegarde S3 quotidienne à 3h du matin
+0 3 * * * /chemin/vers/openwebui/config/script/backup-openwebui.sh --s3-bucket mon-bucket --s3-only --quiet
+
+# Exemple avec logs
+0 2 * * * /chemin/vers/openwebui/config/script/backup-openwebui.sh --s3-bucket mon-bucket --quiet >> /var/log/openwebui-backup.log 2>&1
+```
+
+### Prérequis pour S3
+
+Pour utiliser la sauvegarde S3, vous devez installer et configurer AWS CLI :
+
+```bash
+# Installation d'AWS CLI (Linux/macOS)
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
+
+# Configuration d'AWS CLI
+aws configure
+# AWS Access Key ID: [Votre clé d'accès]
+# AWS Secret Access Key: [Votre clé secrète]  
+# Default region name: [eu-west-1]
+# Default output format: [json]
+
+# Test de configuration
+aws sts get-caller-identity
+```
+
+### Format des sauvegardes
+
+Les sauvegardes sont nommées selon le format : `update_openwebui_YYYYMMDD_HHMMSS.tar.gz`
+
+- **Stockage local** : `backups/` dans le répertoire du projet (par défaut)
+- **Stockage S3** : `s3://votre-bucket/openwebui-backups/update_openwebui_YYYYMMDD_HHMMSS.tar.gz`
+- **Rétention locale** : Les 10 dernières sauvegardes sont conservées automatiquement
+- **Rétention S3** : Les 20 dernières sauvegardes sont conservées automatiquement
+- **Taille** : Compression gzip pour optimiser l'espace disque
+- **Vérification** : Contrôle d'intégrité MD5 pour les uploads S3
+
+### Restauration depuis S3
+
+Pour restaurer une sauvegarde depuis S3 :
+
+```bash
+# 1. Lister les sauvegardes disponibles
+aws s3 ls s3://votre-bucket/openwebui-backups/
+
+# 2. Télécharger la sauvegarde souhaitée
+aws s3 cp s3://votre-bucket/openwebui-backups/update_openwebui_20240115_143022.tar.gz /tmp/
+
+# 3. Arrêter OpenWebUI (optionnel pour éviter les conflits)
+docker-compose down
+
+# 4. Restaurer les données
+docker run --rm -v open-webui:/data -v /tmp:/backup alpine tar xzf /backup/update_openwebui_20240115_143022.tar.gz -C /data
+
+# 5. Redémarrer OpenWebUI
+docker-compose up -d
+```
+
+---
 
 ## 🚀 Installation Locale
 
@@ -172,7 +323,18 @@ docker-compose restart
 
 ### Mise à jour
 
-Pour mettre à jour vers la dernière version :
+#### 🔄 Mise à jour automatique (recommandé)
+
+Utilisez le script automatisé pour une mise à jour en une seule commande :
+
+```bash
+# Mise à jour automatique avec toutes les vérifications
+./config/script/update-openwebui.sh
+```
+
+#### 🛠️ Mise à jour manuelle
+
+Si vous préférez effectuer la mise à jour manuellement :
 
 ```bash
 # Arrêter les services
