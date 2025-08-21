@@ -10,6 +10,13 @@
 # Options:
 #   --quiet          : Mode silencieux (pour cron)
 #   --help           : Afficher cette aide
+#   --env-type TYPE  : Type d'environnement (local/prod)
+#   --env-file FILE  : Fichier d'environnement personnalisé
+#   --backup-type TYPE : Type de sauvegarde (local/s3/both)
+#   --s3-bucket BUCKET : Nom du bucket S3
+#   --s3-prefix PREFIX : Préfixe S3
+#   --output-dir DIR : Répertoire de destination personnalisé
+#   --data-only      : Sauvegarde des données essentielles uniquement
 # =============================================================================
 
 set -euo pipefail
@@ -66,6 +73,7 @@ S3_ONLY=false
 DATA_ONLY=false
 ENV_FILE=""
 ENV_TYPE=""
+BACKUP_TYPE=""
 
 # =============================================================================
 # Fonctions utilitaires avec Gum
@@ -83,6 +91,25 @@ show_help() {
 ## Options
 - `--quiet` : Mode silencieux (pour cron)
 - `--help` : Afficher cette aide
+- `--env-type TYPE` : Type d'environnement (local/prod)
+- `--env-file FILE` : Fichier d'environnement personnalisé
+- `--backup-type TYPE` : Type de sauvegarde (local/s3/both)
+- `--s3-bucket BUCKET` : Nom du bucket S3
+- `--s3-prefix PREFIX` : Préfixe S3 (défaut: openwebui-backups/)
+- `--output-dir DIR` : Répertoire de destination personnalisé
+- `--data-only` : Sauvegarde des données essentielles uniquement
+
+## Exemples
+```bash
+# Sauvegarde locale complète
+./backup-openwebui.sh --backup-type local
+
+# Sauvegarde S3 avec données essentielles uniquement
+./backup-openwebui.sh --backup-type s3 --s3-bucket mon-bucket --data-only
+
+# Sauvegarde locale et S3 avec environnement de production
+./backup-openwebui.sh --backup-type both --env-type prod --s3-bucket mon-bucket
+```
 
 ## Mode interactif
 Sans options, le script vous guidera interactivement pour configurer :
@@ -649,6 +676,66 @@ while [[ $# -gt 0 ]]; do
             SHOW_HELP=true
             shift
             ;;
+        --env-type)
+            ENV_TYPE="$2"
+            if [[ "$ENV_TYPE" != "local" && "$ENV_TYPE" != "prod" ]]; then
+                error "Type d'environnement invalide : $ENV_TYPE (utilisez 'local' ou 'prod')"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --env-file)
+            ENV_FILE="$2"
+            if [[ ! -f "$ENV_FILE" ]]; then
+                error "Fichier d'environnement introuvable : $ENV_FILE"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --backup-type)
+            BACKUP_TYPE="$2"
+            case "$BACKUP_TYPE" in
+                "local")
+                    S3_ONLY=false
+                    ;;
+                "s3")
+                    S3_ONLY=true
+                    ;;
+                "both")
+                    S3_ONLY=false
+                    # Pour "both", on a besoin du bucket S3
+                    ;;
+                *)
+                    error "Type de sauvegarde invalide : $BACKUP_TYPE (utilisez 'local', 's3' ou 'both')"
+                    exit 1
+                    ;;
+            esac
+            shift 2
+            ;;
+        --s3-bucket)
+            S3_BUCKET="$2"
+            shift 2
+            ;;
+        --s3-prefix)
+            S3_PREFIX="$2"
+            # S'assurer que le préfixe se termine par /
+            if [[ -n "$S3_PREFIX" && ! "$S3_PREFIX" =~ /$ ]]; then
+                S3_PREFIX="${S3_PREFIX}/"
+            fi
+            shift 2
+            ;;
+        --output-dir)
+            CUSTOM_OUTPUT_DIR="$2"
+            if [[ ! -d "$CUSTOM_OUTPUT_DIR" ]]; then
+                error "Répertoire de destination introuvable : $CUSTOM_OUTPUT_DIR"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --data-only)
+            DATA_ONLY=true
+            shift
+            ;;
         *)
             error "Option inconnue : $1"
             error "Utilisez --help pour voir les options disponibles"
@@ -664,6 +751,42 @@ done
 if [ "$SHOW_HELP" = true ]; then
     show_help
     exit 0
+fi
+
+# Traitement des variables d'environnement si spécifiées
+if [ -n "$ENV_TYPE" ] || [ -n "$ENV_FILE" ]; then
+    if [ -n "$ENV_TYPE" ] && [ -z "$ENV_FILE" ]; then
+        case "$ENV_TYPE" in
+            "local")
+                ENV_FILE="$PROJECT_ROOT/.env.local"
+                ;;
+            "prod")
+                ENV_FILE="$PROJECT_ROOT/.env.prod"
+                ;;
+        esac
+    fi
+    
+    if [ -n "$ENV_FILE" ]; then
+        load_env_file "$ENV_FILE"
+        
+        # Utiliser les variables d'environnement si les options ne sont pas définies
+        if [ -z "$S3_BUCKET" ] && [ -n "${S3_BACKUP_BUCKET:-}" ]; then
+            S3_BUCKET="$S3_BACKUP_BUCKET"
+        fi
+        
+        if [ "$S3_PREFIX" = "openwebui-backups/" ] && [ -n "${S3_BACKUP_PREFIX:-}" ]; then
+            S3_PREFIX="$S3_BACKUP_PREFIX"
+        fi
+    fi
+fi
+
+# Validation des options pour S3
+if [[ "$BACKUP_TYPE" == "s3" ]] || [[ "$BACKUP_TYPE" == "both" ]] || [ "$S3_ONLY" = true ]; then
+    if [ -z "$S3_BUCKET" ]; then
+        error "Option --s3-bucket requise pour la sauvegarde S3"
+        error "Utilisez --s3-bucket BUCKET ou définissez S3_BACKUP_BUCKET dans votre fichier d'environnement"
+        exit 1
+    fi
 fi
 
 # Si aucun argument n'est fourni et qu'on n'est pas en mode silencieux,
