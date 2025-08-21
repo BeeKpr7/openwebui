@@ -1,22 +1,26 @@
 #!/bin/bash
 
 # =============================================================================
-# Script de sauvegarde automatique d'OpenWebUI
+# Script de sauvegarde automatique d'OpenWebUI avec interface Gum
 # =============================================================================
 # Ce script crée une sauvegarde du volume Docker OpenWebUI
-# Peut être exécuté indépendamment ou via cron
+# Interface interactive utilisant charmbracelet/gum
 #
 # Usage: ./backup-openwebui.sh [OPTIONS]
 # Options:
 #   --quiet          : Mode silencieux (pour cron)
-#   --output-dir     : Répertoire de destination (défaut: backups/)
-#   --s3-bucket      : Bucket S3 pour sauvegarde distante
-#   --s3-prefix      : Préfixe S3 (défaut: openwebui-backups/)
-#   --s3-only        : Sauvegarder uniquement vers S3 (pas de copie locale)
 #   --help           : Afficher cette aide
 # =============================================================================
 
 set -euo pipefail
+
+# Vérifier que Gum est installé
+if ! command -v gum &> /dev/null; then
+    echo "❌ Gum n'est pas installé. Installez-le avec:"
+    echo "   brew install gum  # macOS/Linux"
+    echo "   ou visitez: https://github.com/charmbracelet/gum"
+    exit 1
+fi
 
 # Variables
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,7 +34,7 @@ BACKUP_PREFIX="update_openwebui_"
 load_env_file() {
     local env_file="$1"
     if [ -f "$env_file" ]; then
-        log "Chargement des variables depuis : $env_file"
+        gum_log "info" "Chargement des variables depuis : $env_file"
         # Exporter les variables en ignorant les commentaires et lignes vides
         while IFS= read -r line || [ -n "$line" ]; do
             # Ignorer les commentaires et lignes vides
@@ -43,19 +47,17 @@ load_env_file() {
             fi
         done < "$env_file"
     else
-        warning "Fichier d'environnement introuvable : $env_file"
+        gum_log "warn" "Fichier d'environnement introuvable : $env_file"
     fi
 }
 
-# Couleurs pour l'affichage
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Options par défaut
+# Variables par défaut
 QUIET_MODE=false
+BACKUP_DIR="$PROJECT_ROOT/backups"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+BACKUP_PREFIX="update_openwebui_"
+
+# Configuration interactive
 CUSTOM_OUTPUT_DIR=""
 SHOW_HELP=false
 S3_BUCKET=""
@@ -66,82 +68,202 @@ ENV_FILE=""
 ENV_TYPE=""
 
 # =============================================================================
-# Fonctions utilitaires
+# Fonctions utilitaires avec Gum
 # =============================================================================
 
 show_help() {
-    cat << EOF
-💾 Script de sauvegarde OpenWebUI
+    gum format --type markdown << 'EOF'
+# 💾 Script de sauvegarde OpenWebUI
 
-USAGE:
-    $0 [OPTIONS]
+## Usage
+```bash
+./backup-openwebui.sh [OPTIONS]
+```
 
-OPTIONS:
-    --quiet                     Mode silencieux (pas de couleurs, pour cron)
-    --output-dir DIR            Répertoire de destination personnalisé
-    --s3-bucket BUCKET          Bucket S3 pour sauvegarde distante
-    --s3-prefix PREFIX          Préfixe S3 (défaut: openwebui-backups/)
-    --s3-only                   Sauvegarder uniquement vers S3 (pas de copie locale)
-    --data-only                 Sauvegarder uniquement les données essentielles (exclut cache et modèles)
-    --env local|prod            Environnement à utiliser (charge .env.local ou .env.prod)
-    --env-file FILE             Fichier d'environnement personnalisé à charger
-    --help                      Afficher cette aide
+## Options
+- `--quiet` : Mode silencieux (pour cron)
+- `--help` : Afficher cette aide
 
-EXAMPLES:
-    $0                                              # Sauvegarde locale standard
-    $0 --quiet                                      # Pour utilisation avec cron
-    $0 --env local                                  # Avec variables d'environnement locales
-    $0 --env prod --s3-only                         # Sauvegarde S3 prod uniquement
-    $0 --data-only                                  # Sauvegarde des données essentielles uniquement
-    $0 --env-file .env.custom                       # Fichier d'environnement personnalisé
-    $0 --output-dir /path/to/backup                 # Répertoire personnalisé
-    $0 --s3-bucket mon-bucket-s3                    # Sauvegarde locale + S3
-    $0 --s3-bucket mon-bucket-s3 --s3-only          # Sauvegarde S3 uniquement
-    $0 --s3-bucket mon-bucket-s3 --s3-prefix bkp/   # Avec préfixe S3 personnalisé
+## Mode interactif
+Sans options, le script vous guidera interactivement pour configurer :
+- Type de sauvegarde (locale, S3, ou les deux)
+- Répertoire de destination personnalisé
+- Configuration S3 (bucket, préfixe)
+- Sauvegarde complète ou données essentielles uniquement
+- Variables d'environnement (.env.local, .env.prod, ou fichier personnalisé)
 
-VARIABLES D'ENVIRONNEMENT:
-    Si --env ou --env-file est spécifié, les variables suivantes seront chargées :
-    - AWS_ACCESS_KEY_ID         : Clé d'accès AWS
-    - AWS_SECRET_ACCESS_KEY     : Clé secrète AWS
-    - AWS_DEFAULT_REGION        : Région AWS par défaut
-    - S3_BACKUP_BUCKET          : Nom du bucket S3 (remplace --s3-bucket)
-    - S3_BACKUP_PREFIX          : Préfixe S3 (remplace --s3-prefix)
+## Variables d'environnement supportées
+- `AWS_ACCESS_KEY_ID` : Clé d'accès AWS
+- `AWS_SECRET_ACCESS_KEY` : Clé secrète AWS  
+- `AWS_DEFAULT_REGION` : Région AWS par défaut
+- `S3_BACKUP_BUCKET` : Nom du bucket S3
+- `S3_BACKUP_PREFIX` : Préfixe S3
 
-SORTIE:
-    Le fichier de sauvegarde sera nommé : ${BACKUP_PREFIX}YYYYMMDD_HHMMSS.tar.gz
-
+## Sortie
+Le fichier de sauvegarde sera nommé : `${BACKUP_PREFIX}YYYYMMDD_HHMMSS.tar.gz`
 EOF
 }
 
-log() {
+# Fonction de logging unifiée avec Gum
+gum_log() {
+    local level="$1"
+    local message="$2"
+    
     if [ "$QUIET_MODE" = false ]; then
-        echo -e "${BLUE}[INFO]${NC} $1"
+        case "$level" in
+            "info")
+                gum log --structured --level info "$message"
+                ;;
+            "success")
+                gum style --foreground 212 --bold "✅ $message"
+                ;;
+            "warn")
+                gum log --structured --level warn "$message"
+                ;;
+            "error")
+                gum log --structured --level error "$message" >&2
+                ;;
+            *)
+                echo "$message"
+                ;;
+        esac
     else
-        echo "[INFO] $1"
+        echo "[$level] $message"
     fi
 }
 
-success() {
-    if [ "$QUIET_MODE" = false ]; then
-        echo -e "${GREEN}[SUCCESS]${NC} $1"
-    else
-        echo "[SUCCESS] $1"
-    fi
-}
+# Fonctions de logging simplifiées
+log() { gum_log "info" "$1"; }
+success() { gum_log "success" "$1"; }
+warning() { gum_log "warn" "$1"; }
+error() { gum_log "error" "$1"; }
 
-warning() {
-    if [ "$QUIET_MODE" = false ]; then
-        echo -e "${YELLOW}[WARNING]${NC} $1"
-    else
-        echo "[WARNING] $1"
-    fi
-}
+# =============================================================================
+# Interface interactive avec Gum
+# =============================================================================
 
-error() {
-    if [ "$QUIET_MODE" = false ]; then
-        echo -e "${RED}[ERROR]${NC} $1" >&2
-    else
-        echo "[ERROR] $1" >&2
+interactive_setup() {
+    # En-tête stylisé
+    gum style \
+        --foreground 212 --border-foreground 212 --border double \
+        --align center --width 60 --margin "1 2" --padding "2 4" \
+        "💾 Sauvegarde OpenWebUI" "Configuration interactive"
+    
+    echo
+    
+    # 1. Chargement des variables d'environnement
+    if gum confirm "Voulez-vous charger des variables d'environnement ?"; then
+        ENV_TYPE=$(gum choose --header "Choisir le type d'environnement :" \
+            "local (.env.local)" \
+            "prod (.env.prod)" \
+            "fichier personnalisé")
+        
+        case "$ENV_TYPE" in
+            "local (.env.local)")
+                ENV_TYPE="local"
+                ENV_FILE="$PROJECT_ROOT/.env.local"
+                ;;
+            "prod (.env.prod)")
+                ENV_TYPE="prod"
+                ENV_FILE="$PROJECT_ROOT/.env.prod"
+                ;;
+            "fichier personnalisé")
+                ENV_FILE=$(gum file --directory="$PROJECT_ROOT" --file \
+                    --header "Sélectionner le fichier d'environnement :")
+                ENV_TYPE=""
+                ;;
+        esac
+        
+        # Charger immédiatement les variables d'environnement
+        if [ -n "$ENV_FILE" ]; then
+            load_env_file "$ENV_FILE"
+            gum_log "info" "Variables d'environnement chargées depuis : $ENV_FILE"
+        fi
+        echo
+    fi
+    
+    # 2. Type de sauvegarde
+    BACKUP_TYPE=$(gum choose --header "Type de sauvegarde :" \
+        "Locale uniquement" \
+        "S3 uniquement" \
+        "Locale + S3")
+    
+    case "$BACKUP_TYPE" in
+        "S3 uniquement")
+            S3_ONLY=true
+            ;;
+        "Locale + S3")
+            S3_ONLY=false
+            ;;
+        *)
+            S3_ONLY=false
+            ;;
+    esac
+    echo
+    
+    # 3. Configuration S3 si nécessaire
+    if [[ "$BACKUP_TYPE" == *"S3"* ]]; then
+        gum style --foreground 99 --bold "🔧 Configuration S3"
+        echo
+        
+        # Utiliser les valeurs du fichier d'environnement si disponibles
+        local default_bucket="${S3_BACKUP_BUCKET:-mon-bucket-backup}"
+        local default_prefix="${S3_BACKUP_PREFIX:-openwebui-backups/}"
+        
+        S3_BUCKET=$(gum input --header "Nom du bucket S3 :" \
+            --placeholder "$default_bucket" \
+            --value "${S3_BACKUP_BUCKET:-}")
+        
+        S3_PREFIX=$(gum input --header "Préfixe S3 (optionnel) :" \
+            --placeholder "$default_prefix" \
+            --value "${S3_BACKUP_PREFIX:-openwebui-backups/}")
+        
+        # S'assurer que le préfixe se termine par /
+        if [[ -n "$S3_PREFIX" && ! "$S3_PREFIX" =~ /$ ]]; then
+            S3_PREFIX="${S3_PREFIX}/"
+        fi
+        echo
+    fi
+    
+    # 4. Répertoire de destination (si sauvegarde locale)
+    if [ "$S3_ONLY" = false ]; then
+        if gum confirm "Utiliser un répertoire de destination personnalisé ?"; then
+            CUSTOM_OUTPUT_DIR=$(gum file --directory \
+                --header "Sélectionner le répertoire de destination :")
+        fi
+        echo
+    fi
+    
+    # 5. Type de données à sauvegarder
+    DATA_TYPE=$(gum choose --header "Données à sauvegarder :" \
+        "Sauvegarde complète (tous les fichiers)" \
+        "Données essentielles uniquement (exclut cache, logs, modèles)")
+    
+    if [[ "$DATA_TYPE" == *"essentielles"* ]]; then
+        DATA_ONLY=true
+    fi
+    echo
+    
+    # 6. Résumé de la configuration
+    gum style --foreground 212 --bold "📋 Résumé de la configuration"
+    echo
+    
+    gum format --type markdown << EOF
+## Configuration choisie :
+
+- **Type de sauvegarde** : $BACKUP_TYPE
+- **Données** : $([ "$DATA_ONLY" = true ] && echo "Essentielles uniquement" || echo "Complète")
+$([ -n "$ENV_TYPE" ] && echo "- **Environnement** : $ENV_TYPE")
+$([ -n "$ENV_FILE" ] && echo "- **Fichier env** : $ENV_FILE")
+$([ -n "$S3_BUCKET" ] && echo "- **Bucket S3** : $S3_BUCKET")
+$([ -n "$S3_PREFIX" ] && echo "- **Préfixe S3** : $S3_PREFIX")
+$([ -n "$CUSTOM_OUTPUT_DIR" ] && echo "- **Répertoire** : $CUSTOM_OUTPUT_DIR")
+EOF
+    
+    echo
+    if ! gum confirm "Confirmer et démarrer la sauvegarde ?"; then
+        gum style --foreground 196 "❌ Sauvegarde annulée"
+        exit 0
     fi
 }
 
@@ -235,7 +357,8 @@ check_prerequisites() {
 # =============================================================================
 
 create_backup() {
-    log "Création d'une sauvegarde du volume OpenWebUI..."
+    gum style --foreground 99 --bold "🔄 Création de la sauvegarde"
+    echo
     
     # Déterminer le répertoire de sauvegarde
     local backup_dir
@@ -259,7 +382,7 @@ create_backup() {
         log "Destination locale : $backup_file"
     fi
     
-    # Créer la sauvegarde
+    # Créer la sauvegarde avec spinner
     local tar_command
     if [ "$DATA_ONLY" = true ]; then
         log "Mode sauvegarde des données essentielles uniquement"
@@ -270,7 +393,9 @@ create_backup() {
         tar_command="tar czf \"/backup/$backup_filename\" -C /data ."
     fi
     
-    if docker run --rm \
+    # Exécuter la sauvegarde avec un spinner
+    if gum spin --spinner dot --title "Création de l'archive en cours..." -- \
+        docker run --rm \
         -v "$VOLUME_NAME:/data:ro" \
         -v "$backup_dir:/backup" \
         alpine:latest \
@@ -282,13 +407,13 @@ create_backup() {
             file_size=$(ls -lh "$backup_file" | awk '{print $5}')
             if [ "$DATA_ONLY" = true ]; then
                 success "Sauvegarde des données essentielles créée avec succès ($file_size)"
-                log "Exclusions appliquées : cache, logs, modèles, fichiers temporaires"
+                gum style --foreground 240 "Exclusions appliquées : cache, logs, modèles, fichiers temporaires"
             else
                 success "Sauvegarde complète créée avec succès ($file_size)"
             fi
             
             if [ "$S3_ONLY" = false ]; then
-                echo "Chemin local : $(realpath "$backup_file")"
+                gum style --foreground 99 "📁 Chemin local : $(realpath "$backup_file")"
             fi
             
             # Upload vers S3 si configuré
@@ -323,7 +448,10 @@ upload_to_s3() {
     local s3_key="${S3_PREFIX}${filename}"
     local s3_url="s3://${S3_BUCKET}/${s3_key}"
     
-    log "Upload vers S3 : $s3_url"
+    gum style --foreground 99 --bold "☁️ Upload vers S3"
+    echo
+    
+    log "Destination S3 : $s3_url"
     
     # Calculer le MD5 local pour vérification
     local local_md5
@@ -335,13 +463,15 @@ upload_to_s3() {
         local_md5=""
     fi
     
-    # Upload vers S3 avec endpoint Hetzner
-    if aws s3 cp "$local_file" "$s3_url" --endpoint-url https://nbg1.your-objectstorage.com --only-show-errors; then
+    # Upload vers S3 avec spinner
+    if gum spin --spinner dot --title "Upload en cours vers S3..." -- \
+        aws s3 cp "$local_file" "$s3_url" --endpoint-url https://nbg1.your-objectstorage.com --only-show-errors; then
+        
         success "Upload S3 réussi : $s3_url"
         
         # Vérification optionnelle de l'intégrité
         if [ -n "$local_md5" ]; then
-            log "Vérification de l'intégrité..."
+            gum spin --spinner dot --title "Vérification de l'intégrité..." -- sleep 1
             local s3_etag
             s3_etag=$(aws s3api head-object --bucket "$S3_BUCKET" --key "$s3_key" --endpoint-url https://nbg1.your-objectstorage.com --query 'ETag' --output text 2>/dev/null | tr -d '"')
             
@@ -424,14 +554,8 @@ cleanup_old_backups() {
 # =============================================================================
 
 main_backup() {
-    if [ "$QUIET_MODE" = false ]; then
-        echo "💾 Sauvegarde automatique d'OpenWebUI"
-        echo "====================================="
-        echo
-    fi
-    
-    # Charger les variables d'environnement si spécifié
-    if [ -n "$ENV_TYPE" ]; then
+    # Charger les variables d'environnement si elles n'ont pas été chargées en mode interactif
+    if [ -n "$ENV_TYPE" ] && [ -z "$ENV_FILE" ]; then
         case "$ENV_TYPE" in
             "local")
                 ENV_FILE="$PROJECT_ROOT/.env.local"
@@ -446,16 +570,8 @@ main_backup() {
                 exit 1
                 ;;
         esac
-    fi
-    
-    if [ -n "$ENV_FILE" ]; then
-        if [[ "$ENV_FILE" = /* ]]; then
-            # Chemin absolu
-            load_env_file "$ENV_FILE"
-        else
-            # Chemin relatif depuis la racine du projet
-            load_env_file "$PROJECT_ROOT/$ENV_FILE"
-        fi
+        
+        load_env_file "$ENV_FILE"
         
         # Utiliser les variables d'environnement si disponibles
         if [ -z "$S3_BUCKET" ] && [ -n "${S3_BACKUP_BUCKET:-}" ]; then
@@ -475,28 +591,43 @@ main_backup() {
     
     if [ "$QUIET_MODE" = false ]; then
         echo
-        success "🎉 Sauvegarde terminée avec succès !"
+        gum style \
+            --foreground 212 --border-foreground 212 --border double \
+            --align center --width 60 --margin "1 2" --padding "2 4" \
+            "🎉 Sauvegarde terminée avec succès !"
+        
         echo
         
         if [ "$S3_ONLY" = false ]; then
-            log "Pour restaurer cette sauvegarde locale :"
+            gum style --foreground 99 --bold "📋 Commandes de restauration locale :"
             local backup_path
             if [ -n "$CUSTOM_OUTPUT_DIR" ]; then
                 backup_path="$CUSTOM_OUTPUT_DIR"
             else
                 backup_path="$BACKUP_DIR"
             fi
-            echo "  docker run --rm -v $VOLUME_NAME:/data -v $backup_path:/backup alpine tar xzf /backup/${BACKUP_PREFIX}${TIMESTAMP}.tar.gz -C /data"
+            
+            gum format --type code << EOF
+docker run --rm -v $VOLUME_NAME:/data -v $backup_path:/backup alpine \\
+  tar xzf /backup/${BACKUP_PREFIX}${TIMESTAMP}.tar.gz -C /data
+EOF
         fi
         
         if [ -n "$S3_BUCKET" ]; then
             echo
-            log "Pour restaurer depuis S3 :"
-            echo "  # Télécharger depuis S3"
-            echo "  aws s3 cp s3://$S3_BUCKET/${S3_PREFIX}${BACKUP_PREFIX}${TIMESTAMP}.tar.gz /tmp/"
-            echo "  # Restaurer dans Docker"
-            echo "  docker run --rm -v $VOLUME_NAME:/data -v /tmp:/backup alpine tar xzf /backup/${BACKUP_PREFIX}${TIMESTAMP}.tar.gz -C /data"
+            gum style --foreground 99 --bold "☁️ Commandes de restauration S3 :"
+            gum format --type code << EOF
+# Télécharger depuis S3
+aws s3 cp s3://$S3_BUCKET/${S3_PREFIX}${BACKUP_PREFIX}${TIMESTAMP}.tar.gz /tmp/
+
+# Restaurer dans Docker
+docker run --rm -v $VOLUME_NAME:/data -v /tmp:/backup alpine \\
+  tar xzf /backup/${BACKUP_PREFIX}${TIMESTAMP}.tar.gz -C /data
+EOF
         fi
+        
+        echo
+        gum style --foreground 240 "Sauvegarde terminée le $(date '+%d/%m/%Y à %H:%M:%S')"
     fi
 }
 
@@ -504,43 +635,15 @@ main_backup() {
 # Parsing des arguments
 # =============================================================================
 
+# Variables pour détecter si des arguments ont été fournis
+ARGS_PROVIDED=false
+
 while [[ $# -gt 0 ]]; do
+    ARGS_PROVIDED=true
     case $1 in
         --quiet)
             QUIET_MODE=true
             shift
-            ;;
-        --output-dir)
-            CUSTOM_OUTPUT_DIR="$2"
-            shift 2
-            ;;
-        --s3-bucket)
-            S3_BUCKET="$2"
-            shift 2
-            ;;
-        --s3-prefix)
-            S3_PREFIX="$2"
-            # S'assurer que le préfixe se termine par /
-            if [[ ! "$S3_PREFIX" =~ /$ ]]; then
-                S3_PREFIX="${S3_PREFIX}/"
-            fi
-            shift 2
-            ;;
-        --s3-only)
-            S3_ONLY=true
-            shift
-            ;;
-        --data-only)
-            DATA_ONLY=true
-            shift
-            ;;
-        --env)
-            ENV_TYPE="$2"
-            shift 2
-            ;;
-        --env-file)
-            ENV_FILE="$2"
-            shift 2
             ;;
         --help|-h)
             SHOW_HELP=true
@@ -548,7 +651,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         *)
             error "Option inconnue : $1"
-            show_help
+            error "Utilisez --help pour voir les options disponibles"
             exit 1
             ;;
     esac
@@ -561,6 +664,12 @@ done
 if [ "$SHOW_HELP" = true ]; then
     show_help
     exit 0
+fi
+
+# Si aucun argument n'est fourni et qu'on n'est pas en mode silencieux,
+# lancer l'interface interactive
+if [ "$ARGS_PROVIDED" = false ] && [ "$QUIET_MODE" = false ]; then
+    interactive_setup
 fi
 
 main_backup 
