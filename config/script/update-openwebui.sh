@@ -1,24 +1,36 @@
 #!/bin/bash
 
 # =============================================================================
-# Script de mise à jour automatique d'OpenWebUI
+# Script de mise à jour automatique d'OpenWebUI avec interface Gum
 # =============================================================================
 # Ce script automatise la mise à jour de votre installation Docker OpenWebUI
-# vers la dernière version disponible.
+# vers la dernière version disponible avec une interface interactive moderne.
 #
 # Usage: ./update-openwebui.sh [OPTIONS]
 # Options:
 #   --backup         : Forcer une sauvegarde avant mise à jour
 #   --no-backup      : Passer la sauvegarde
 #   --dry-run        : Simuler sans exécuter
+#   --env ENV        : Forcer l'environnement (local|prod)
+#   --quiet          : Mode silencieux
+#   --interactive    : Forcer le mode interactif
 #   --help           : Afficher cette aide
 # =============================================================================
 
 set -euo pipefail
 
+# Vérifier que Gum est installé
+if ! command -v gum &> /dev/null; then
+    echo "❌ Gum n'est pas installé. Installez-le avec:"
+    echo "   brew install gum  # macOS/Linux"
+    echo "   ou visitez: https://github.com/charmbracelet/gum"
+    exit 1
+fi
+
 # Variables
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 CONTAINER_NAME=""
 VOLUME_NAME=""
 IMAGE_NAME="ghcr.io/open-webui/open-webui:main"
@@ -29,82 +41,240 @@ ENVIRONMENT=""
 COMPOSE_FILE=""
 COMPOSE_PROJECT_NAME=""
 
-# Couleurs pour l'affichage
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
 # Options par défaut
 FORCE_BACKUP=false
 NO_BACKUP=false
 DRY_RUN=false
 SHOW_HELP=false
+QUIET_MODE=false
+INTERACTIVE_MODE=false
 ENV_OVERRIDE=""
 
+# Variables pour détecter si des arguments ont été fournis
+ARGS_PROVIDED=false
+
 # =============================================================================
-# Fonctions utilitaires
+# Fonctions utilitaires avec Gum
 # =============================================================================
 
 show_help() {
-    cat << EOF
-🔄 Script de mise à jour OpenWebUI
+    gum format --type markdown << 'EOF'
+# 🔄 Script de mise à jour OpenWebUI
 
-USAGE:
-    $0 [OPTIONS]
+## Usage
+```bash
+./update-openwebui.sh [OPTIONS]
+```
 
-OPTIONS:
-    --backup         Forcer une sauvegarde avant mise à jour
-    --no-backup      Passer la sauvegarde
-    --dry-run        Simuler sans exécuter les commandes
-    --env ENV        Forcer l'environnement (local|prod)
-    --help           Afficher cette aide
+## Options
+- `--backup` : Forcer une sauvegarde avant mise à jour
+- `--no-backup` : Passer la sauvegarde
+- `--dry-run` : Simuler sans exécuter les commandes
+- `--env ENV` : Forcer l'environnement (local|prod)
+- `--quiet` : Mode silencieux
+- `--interactive` : Forcer le mode interactif
+- `--help` : Afficher cette aide
 
-EXAMPLES:
-    $0                    # Mise à jour normale avec détection automatique
-    $0 --env local        # Forcer l'environnement local
-    $0 --env prod         # Forcer l'environnement production
-    $0 --backup           # Mise à jour avec sauvegarde forcée
-    $0 --no-backup        # Mise à jour sans sauvegarde
-    $0 --dry-run          # Simulation de la mise à jour
+## Exemples
+```bash
+# Mise à jour normale avec détection automatique
+./update-openwebui.sh
 
-ENVIRONNEMENTS:
-    local    - Utilise docker-compose.yml avec projet apollo-13
-    prod     - Utilise docker-compose.prod.yml sans nom de projet
+# Forcer l'environnement local
+./update-openwebui.sh --env local
 
+# Mise à jour avec sauvegarde forcée
+./update-openwebui.sh --backup
+
+# Mode simulation
+./update-openwebui.sh --dry-run
+
+# Mode interactif forcé
+./update-openwebui.sh --interactive
+```
+
+## Mode interactif
+Sans arguments, le script vous guidera interactivement pour :
+- Choisir l'environnement (local/prod/auto)
+- Configurer les options de sauvegarde
+- Activer le mode simulation
+- Confirmer avant exécution
+
+## Environnements
+- **local** : Utilise docker-compose.yml avec projet apollo-13
+- **prod** : Utilise docker-compose.prod.yml sans nom de projet
+
+## Notes
+- L'environnement sera détecté automatiquement si non spécifié
+- Une sauvegarde peut être créée avant la mise à jour
+- Le mode simulation permet de voir les commandes sans les exécuter
 EOF
 }
 
-log() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+# Fonction de logging unifiée avec Gum
+gum_log() {
+    local level="$1"
+    local message="$2"
+    
+    if [ "$QUIET_MODE" = false ]; then
+        case "$level" in
+            "info")
+                gum log --structured --level info "$message"
+                ;;
+            "success")
+                gum style --foreground 212 --bold "✅ $message"
+                ;;
+            "warn")
+                gum log --structured --level warn "$message"
+                ;;
+            "error")
+                gum log --structured --level error "$message" >&2
+                ;;
+            *)
+                echo "$message"
+                ;;
+        esac
+    else
+        echo "[$level] $message"
+    fi
 }
 
-success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-
-warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
-}
-
-error() {
-    echo -e "${RED}[ERROR]${NC} $1" >&2
-}
+# Fonctions de logging simplifiées
+log() { gum_log "info" "$1"; }
+success() { gum_log "success" "$1"; }
+warning() { gum_log "warn" "$1"; }
+error() { gum_log "error" "$1"; }
 
 execute_command() {
     local cmd="$1"
     local description="$2"
+    local spinner_title="${3:-$description}"
     
     if [ "$DRY_RUN" = true ]; then
-        echo -e "${YELLOW}[DRY-RUN]${NC} $description"
-        echo -e "${YELLOW}→${NC} $cmd"
+        gum style --foreground 220 --bold "[DRY-RUN] $description"
+        gum format --type code << EOF
+$cmd
+EOF
     else
-        log "$description"
-        if ! eval "$cmd"; then
+        if gum spin --spinner dot --title "$spinner_title..." -- bash -c "$cmd"; then
+            success "$description"
+        else
             error "Échec de l'exécution : $description"
             return 1
         fi
+    fi
+}
+
+# =============================================================================
+# Interface interactive avec Gum
+# =============================================================================
+
+interactive_setup() {
+    # En-tête stylisé
+    gum style \
+        --foreground 212 --border-foreground 212 --border double \
+        --align center --width 60 --margin "1 2" --padding "2 4" \
+        "🔄 Mise à jour OpenWebUI" "Configuration interactive"
+    
+    echo
+    
+    # 1. Sélection de l'environnement
+    local env_choice
+    env_choice=$(gum choose --header "Choisir l'environnement :" \
+        "Détection automatique" \
+        "Local (apollo-13)" \
+        "Production")
+    
+    case "$env_choice" in
+        "Local (apollo-13)")
+            ENV_OVERRIDE="local"
+            ;;
+        "Production")
+            ENV_OVERRIDE="prod"
+            ;;
+        *)
+            ENV_OVERRIDE=""
+            ;;
+    esac
+    echo
+    
+    # 2. Options de sauvegarde
+    gum style --foreground 99 --bold "💾 Gestion des données"
+    echo
+    
+    local backup_choice
+    backup_choice=$(gum choose --header "Que souhaitez-vous faire avec vos données actuelles ?" \
+        "Créer une sauvegarde de sécurité avant la mise à jour" \
+        "Procéder directement sans sauvegarde" \
+        "Me demander au moment de la mise à jour")
+    
+    case "$backup_choice" in
+        "Créer une sauvegarde de sécurité avant la mise à jour")
+            FORCE_BACKUP=true
+            ;;
+        "Procéder directement sans sauvegarde")
+            NO_BACKUP=true
+            ;;
+        *)
+            # Par défaut, demander confirmation
+            ;;
+    esac
+    echo
+    
+    # 3. Résumé de la configuration
+    show_update_summary
+}
+
+show_update_summary() {
+    gum style --foreground 212 --bold "📋 Résumé de la mise à jour"
+    echo
+    
+    gum format --type markdown << EOF
+## Configuration choisie :
+
+- **Environnement** : $([ -n "$ENV_OVERRIDE" ] && echo "$ENV_OVERRIDE" || echo "Détection automatique")
+- **Sauvegarde** : $([ "$FORCE_BACKUP" = true ] && echo "Créer automatiquement" || ([ "$NO_BACKUP" = true ] && echo "Aucune sauvegarde" || echo "Demander confirmation"))
+- **Image Docker** : $IMAGE_NAME
+EOF
+    
+    echo
+    if ! gum confirm "Confirmer et démarrer la mise à jour ?"; then
+        gum style --foreground 196 "❌ Mise à jour annulée"
+        exit 0
+    fi
+}
+
+show_final_summary() {
+    if [ "$QUIET_MODE" = false ]; then
+        echo
+        gum style \
+            --foreground 212 --border-foreground 212 --border double \
+            --align center --width 60 --margin "1 2" --padding "2 4" \
+            "🎉 Mise à jour terminée avec succès !"
+        
+        echo
+        
+        gum style --foreground 99 --bold "📋 Informations de mise à jour :"
+        gum format --type markdown << EOF
+## Mise à jour réussie
+
+- **Environnement** : $ENVIRONMENT
+- **Conteneur** : $CONTAINER_NAME
+- **Volume** : $VOLUME_NAME
+- **Mode** : $([ "$DRY_RUN" = true ] && echo "Simulation" || echo "Réel")
+
+## Accès à l'application
+- **URL locale** : http://localhost:8080
+- **Statut** : L'application est disponible
+
+## Commandes utiles
+$([ -n "$COMPOSE_PROJECT_NAME" ] && echo "- **Logs** : docker-compose -p \"$COMPOSE_PROJECT_NAME\" logs -f" || echo "- **Logs** : docker-compose logs -f")
+$([ -n "$COMPOSE_PROJECT_NAME" ] && echo "- **Redémarrer** : docker-compose -p \"$COMPOSE_PROJECT_NAME\" restart" || echo "- **Redémarrer** : docker-compose restart")
+$([ -n "$COMPOSE_PROJECT_NAME" ] && echo "- **Arrêter** : docker-compose -p \"$COMPOSE_PROJECT_NAME\" down" || echo "- **Arrêter** : docker-compose down")
+EOF
+        
+        echo
+        gum style --foreground 240 "Mise à jour terminée le $(date '+%d/%m/%Y à %H:%M:%S')"
     fi
 }
 
@@ -313,11 +483,18 @@ create_backup() {
         return 0
     fi
     
-    log "Appel du script de sauvegarde..."
+    gum style --foreground 99 --bold "💾 Création d'une sauvegarde S3"
+    echo
     
     if [ "$DRY_RUN" = true ]; then
-        echo -e "${YELLOW}[DRY-RUN]${NC} Création de la sauvegarde"
-        echo -e "${YELLOW}→${NC} $BACKUP_SCRIPT"
+        gum style --foreground 220 --bold "[DRY-RUN] Création de la sauvegarde S3 (données essentielles)"
+        local backup_cmd="$BACKUP_SCRIPT --backup-type s3 --data-only --quiet"
+        if [ -n "$ENVIRONMENT" ]; then
+            backup_cmd="$backup_cmd --env-type $ENVIRONMENT"
+        fi
+        gum format --type code << EOF
+$backup_cmd
+EOF
         return 0
     fi
     
@@ -327,12 +504,23 @@ create_backup() {
         return 1
     fi
     
-    # Exécuter le script de sauvegarde
-    if "$BACKUP_SCRIPT"; then
-        success "Sauvegarde créée avec succès"
+    # Construire la commande de sauvegarde avec les options appropriées
+    local backup_cmd="$BACKUP_SCRIPT --backup-type s3 --data-only --quiet"
+    
+    # Ajouter l'environnement détecté
+    if [ -n "$ENVIRONMENT" ]; then
+        backup_cmd="$backup_cmd --env-type $ENVIRONMENT"
+    fi
+    
+    log "Commande de sauvegarde : $backup_cmd"
+    
+    # Exécuter le script de sauvegarde avec spinner
+    if gum spin --spinner dot --title "Création de la sauvegarde S3 (données essentielles)..." -- bash -c "$backup_cmd"; then
+        success "Sauvegarde S3 créée avec succès"
         return 0
     else
-        error "Échec de la sauvegarde"
+        error "Échec de la sauvegarde S3"
+        warning "Vérifiez la configuration S3 dans votre fichier d'environnement"
         return 1
     fi
 }
@@ -342,27 +530,32 @@ create_backup() {
 # =============================================================================
 
 stop_and_remove_container() {
-    log "Arrêt et suppression du conteneur existant..."
+    gum style --foreground 99 --bold "⏹️ Arrêt du conteneur existant"
+    echo
     
     if [ -n "$CONTAINER_NAME" ] && docker inspect "$CONTAINER_NAME" &> /dev/null; then
         execute_command \
             "docker rm -f $CONTAINER_NAME" \
-            "Arrêt et suppression du conteneur $CONTAINER_NAME"
+            "Arrêt et suppression du conteneur $CONTAINER_NAME" \
+            "Arrêt de $CONTAINER_NAME"
     else
         log "Aucun conteneur $CONTAINER_NAME à arrêter (nom vide ou conteneur inexistant)"
     fi
 }
 
 pull_latest_image() {
-    log "Téléchargement de la dernière image Docker..."
+    gum style --foreground 99 --bold "📦 Téléchargement de la nouvelle image"
+    echo
     
     execute_command \
         "docker pull $IMAGE_NAME" \
-        "Téléchargement de $IMAGE_NAME"
+        "Téléchargement de $IMAGE_NAME" \
+        "Téléchargement de l'image Docker"
 }
 
 restart_services() {
-    log "Redémarrage des services avec Docker Compose..."
+    gum style --foreground 99 --bold "🚀 Redémarrage des services"
+    echo
     
     # Change to project root to use the symlinked docker-compose.yml
     cd "$PROJECT_ROOT"
@@ -375,7 +568,8 @@ restart_services() {
     
     execute_command \
         "$compose_cmd" \
-        "Redémarrage avec Docker Compose ($ENVIRONMENT)"
+        "Redémarrage avec Docker Compose ($ENVIRONMENT)" \
+        "Redémarrage d'OpenWebUI"
 }
 
 # =============================================================================
@@ -383,15 +577,17 @@ restart_services() {
 # =============================================================================
 
 verify_update() {
-    log "Vérification de la mise à jour..."
+    gum style --foreground 99 --bold "🔍 Vérification de la mise à jour"
+    echo
     
     # Attendre que le conteneur démarre
     if [ "$DRY_RUN" = false ]; then
-        sleep 5
+        gum spin --spinner dot --title "Attente du démarrage..." -- sleep 5
         
         local max_attempts=30
         local attempt=1
         
+        log "Vérification du statut du conteneur..."
         while [ $attempt -le $max_attempts ]; do
             if [ -n "$CONTAINER_NAME" ] && docker inspect "$CONTAINER_NAME" &> /dev/null; then
                 local container_status
@@ -428,7 +624,8 @@ verify_update() {
         # Test de connectivité (optionnel)
         log "Test de connectivité sur http://127.0.0.1:8080..."
         if command -v curl &> /dev/null; then
-            if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080 | grep -q "200\|302\|301"; then
+            if gum spin --spinner dot --title "Test de connectivité..." -- \
+                bash -c "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080 | grep -q '200\|302\|301'"; then
                 success "OpenWebUI est accessible ✓"
             else
                 warning "OpenWebUI pourrait ne pas être complètement démarré"
@@ -437,20 +634,28 @@ verify_update() {
             log "curl non disponible, vérification manuelle recommandée"
         fi
     else
-        log "Vérification simulée"
+        gum style --foreground 220 --bold "[DRY-RUN] Vérification simulée"
+        gum format --type markdown << EOF
+## Étapes de vérification :
+- Attendre le démarrage du conteneur
+- Vérifier le statut (running)
+- Tester la connectivité HTTP
+- Afficher la nouvelle version
+EOF
     fi
 }
 
 show_logs() {
     if [ "$DRY_RUN" = false ]; then
-        warning "Affichage des derniers logs en cas de problème :"
+        gum style --foreground 196 --bold "📜 Affichage des logs de diagnostic"
+        echo
         # Change to project root to use the symlinked docker-compose.yml
         cd "$PROJECT_ROOT"
         local compose_cmd="docker-compose"
         if [ -n "$COMPOSE_PROJECT_NAME" ]; then
             compose_cmd="$compose_cmd -p \"$COMPOSE_PROJECT_NAME\""
         fi
-        eval "$compose_cmd logs --tail=20" || true
+        eval "$compose_cmd logs --tail=20" | gum format --type code || true
     fi
 }
 
@@ -459,47 +664,44 @@ show_logs() {
 # =============================================================================
 
 main_update() {
-    echo "🔄 Mise à jour automatique d'OpenWebUI"
-    echo "========================================"
+    # En-tête principal
+    gum style \
+        --foreground 212 --border-foreground 212 --border double \
+        --align center --width 70 --margin "1 2" --padding "2 4" \
+        "🔄 Mise à jour automatique d'OpenWebUI" "Modernisation et optimisation"
+    
     echo
     
     check_prerequisites
     get_current_version
     
     # Demander confirmation pour la sauvegarde si pas d'option spécifiée
-    if [ "$FORCE_BACKUP" = false ] && [ "$NO_BACKUP" = false ] && [ "$DRY_RUN" = false ]; then
+    if [ "$FORCE_BACKUP" = false ] && [ "$NO_BACKUP" = false ] && [ "$DRY_RUN" = false ] && [ "$QUIET_MODE" = false ]; then
         echo
-        read -p "Voulez-vous créer une sauvegarde avant la mise à jour ? (o/N) " -r
-        echo
-        if [[ $REPLY =~ ^[OoYy]$ ]]; then
+        if gum confirm "Voulez-vous créer une sauvegarde avant la mise à jour ?"; then
             FORCE_BACKUP=true
         fi
+        echo
     fi
     
     if [ "$FORCE_BACKUP" = true ]; then
         create_backup
+        echo
     fi
     
     stop_and_remove_container
+    echo
+    
     pull_latest_image
+    echo
+    
     restart_services
+    echo
+    
     verify_update
     
-    echo
-    success "🎉 Mise à jour terminée avec succès !"
-    echo
-    log "OpenWebUI est accessible à : http://127.0.0.1:8080"
-    log "Environnement : $ENVIRONMENT"
-    
-    echo
-    log "Commandes utiles :"
-    local compose_base="docker-compose"
-    if [ -n "$COMPOSE_PROJECT_NAME" ]; then
-        compose_base="$compose_base -p \"$COMPOSE_PROJECT_NAME\""
-    fi
-    echo "  • Voir les logs : $compose_base logs -f"
-    echo "  • Redémarrer : $compose_base restart"
-    echo "  • Arrêter : $compose_base down"
+    # Afficher le résumé final
+    show_final_summary
 }
 
 # =============================================================================
@@ -509,10 +711,24 @@ main_update() {
 cleanup() {
     if [ $? -ne 0 ]; then
         echo
-        error "❌ Erreur durant la mise à jour"
+        gum style --foreground 196 --border-foreground 196 --border double \
+            --align center --width 60 --margin "1 2" --padding "1 2" \
+            "❌ Erreur durant la mise à jour"
+        
         show_logs
         echo
-        log "Pour un rollback manuel, consultez la documentation dans docs/OPENWEBUI.md"
+        
+        gum format --type markdown << EOF
+## 🔄 Actions de récupération
+
+Pour un rollback manuel :
+1. Consultez la documentation dans `docs/OPENWEBUI.md`
+2. Utilisez le script de restauration si une sauvegarde existe
+3. Vérifiez les logs avec `docker-compose logs`
+
+## 📞 Support
+En cas de problème persistant, consultez les logs et la documentation.
+EOF
     fi
 }
 
@@ -523,6 +739,7 @@ trap cleanup EXIT
 # =============================================================================
 
 while [[ $# -gt 0 ]]; do
+    ARGS_PROVIDED=true
     case $1 in
         --backup)
             FORCE_BACKUP=true
@@ -544,6 +761,14 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             shift 2
+            ;;
+        --quiet)
+            QUIET_MODE=true
+            shift
+            ;;
+        --interactive)
+            INTERACTIVE_MODE=true
+            shift
             ;;
         --help|-h)
             SHOW_HELP=true
@@ -570,6 +795,13 @@ fi
 if [ "$SHOW_HELP" = true ]; then
     show_help
     exit 0
+fi
+
+# Si aucun argument n'est fourni et qu'on n'est pas en mode silencieux,
+# ou si le mode interactif est forcé, lancer l'interface interactive
+if ([ "$ARGS_PROVIDED" = false ] && [ "$QUIET_MODE" = false ]) || [ "$INTERACTIVE_MODE" = true ]; then
+    interactive_setup
+    echo
 fi
 
 main_update 
