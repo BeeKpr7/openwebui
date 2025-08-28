@@ -102,10 +102,15 @@ create_docker_compose_config() {
     fi
     
     print_info "Copie de la configuration Docker Compose locale"
-    cp config/docker/docker-compose.yml docker-compose.yml
+    cp config/docker/docker-compose.local.yml docker-compose.yml
     
     print_info "Ajustement des chemins relatifs dans docker-compose.yml"
-    sed -i '' 's|../../\.env\.local|.env.local|g' docker-compose.yml
+    # Compatibilité Linux/macOS pour sed -i
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' 's|../../\.env\.local|.env.local|g' docker-compose.yml
+    else
+        sed -i 's|../../\.env\.local|.env.local|g' docker-compose.yml
+    fi
     
     # Vérifier que le fichier docker-compose.yml fonctionne
     if [ -f "docker-compose.yml" ]; then
